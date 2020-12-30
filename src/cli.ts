@@ -1,34 +1,35 @@
 #!/usr/bin/env node
-import * as fs from 'fs/promises';
+import {promises as fs} from 'fs';
 import * as oracledb from 'oracledb';
 import * as dotenv from 'dotenv';
 import {parseAppArgs} from './args';
 
 async function generate
   (
+    tableQNamePattern: string,
     outputFile: string
   )
   : Promise<void>
 {
-  const dbmdJson = await queryDatabaseMetadataJson();
-  
+  const dbmdJson = await queryDatabaseMetadataJson(tableQNamePattern);
+
   await fs.writeFile(outputFile, dbmdJson, "utf-8");
 }
 
-async function queryDatabaseMetadataJson(): Promise<string>
+async function queryDatabaseMetadataJson(tablePattern: string): Promise<string>
 {
   const connectInfo: ConnectInfo = {
     user: process.env.DB_USER || '',
     password: process.env.DB_PASSWORD || '',
     connectString : `${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_SERVICE}`
   };
-  
+
   const conn = await oracledb.getConnection(connectInfo);
 
   try
   {
     const resJson = requireSingleRowColumnStringResult(
-      await conn.execute(dbmdSql, [], {fetchInfo: {"DBMD": {type: oracledb.STRING}}})
+      await conn.execute(dbmdSql, {tablePattern}, {fetchInfo: {"DBMD": {type: oracledb.STRING}}})
     );
 
     const dbmd = JSON.parse(resJson);
@@ -99,6 +100,7 @@ tableMetadatas as (
         returning clob
       ), to_clob('[]')) as json) tableMds
     from user_tables t
+    where regexp_like(t.schema_name || '.' || t.table_name, :tablePattern)
 ),
 foreignKeys as (
 -- foreign keys
@@ -128,6 +130,8 @@ foreignKeys as (
       on pkcol.constraint_name = fkcon.r_constraint_name
       and pkcol.position = fkcol.position
     where fkcon.constraint_type = 'R'
+      and regexp_like(user || '.' || fkcon.table_name, :tablePattern)
+      and regexp_like(user || '.' || pkcon.table_name, :tablePattern)
     group by fkcon.constraint_name, fkcon.table_name, pkcon.table_name
   ) fk
 )
@@ -157,7 +161,7 @@ function printUsage(to: 'stderr' | 'stdout')
 ////////////
 
 const reqdNamedParams: string[] = [];
-const optlNamedParams = ['conn-env'];
+const optlNamedParams = ['conn-env', 'table-pattern'];
 const argsParseResult = parseAppArgs(process.argv.slice(2), reqdNamedParams, optlNamedParams, 1, 1);
 
 if ( typeof argsParseResult === 'string' )
@@ -176,12 +180,13 @@ if ( typeof argsParseResult === 'string' )
 }
 
 const envFile = argsParseResult['conn-env'];
+const includeTablesPattern: string = argsParseResult['table-pattern'] || '.*';
 const outputFile = argsParseResult._[0];
 
 if ( envFile )
   dotenv.config({ path: envFile });
 
-generate(outputFile)
+generate(includeTablesPattern, outputFile)
 .catch(err => {
   console.error(err);
   process.exit(1);
