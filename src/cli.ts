@@ -100,7 +100,7 @@ tableMetadatas as (
         returning clob
       ), to_clob('[]')) as json) tableMds
     from user_tables t
-    where regexp_like(t.schema_name || '.' || t.table_name, :tablePattern)
+    where regexp_like(t.table_name, :tablePattern)
 ),
 foreignKeys as (
 -- foreign keys
@@ -130,8 +130,8 @@ foreignKeys as (
       on pkcol.constraint_name = fkcon.r_constraint_name
       and pkcol.position = fkcol.position
     where fkcon.constraint_type = 'R'
-      and regexp_like(user || '.' || fkcon.table_name, :tablePattern)
-      and regexp_like(user || '.' || pkcon.table_name, :tablePattern)
+      and regexp_like(fkcon.table_name, :tablePattern)
+      and regexp_like(pkcon.table_name, :tablePattern)
     group by fkcon.constraint_name, fkcon.table_name, pkcon.table_name
   ) fk
 )
